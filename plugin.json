@@ -39,6 +39,11 @@
     },
     {
       "builtin": "liked"
+    },
+    {
+      "title": "Podcasts",
+      "page": "podcasts",
+      "icon": "podcast"
     }
   ]
 }

@@ -31,8 +31,8 @@ You sign in on Google's page, in a window of the app. The session is kept unencr
 ## What works
 
 - Signed out: playing, Home, charts, new releases, search, albums, artists, playlists and timed lyrics.
-- Signed in: your library, playlists, liked songs, recently played, liking songs, a personal Home, listening history and radio.
-- Not available: editing playlists, saving albums, following artists, podcasts and comments.
+- Signed in: your library, playlists, liked songs, recently played, liking songs, a personal Home, listening history, radio and podcasts: the shows you keep, their new episodes and shows to find.
+- Not available: editing playlists, saving albums, following artists and comments.
 
 ## How it plays
 

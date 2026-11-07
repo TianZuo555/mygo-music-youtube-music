@@ -175,6 +175,15 @@ function msOf(text) {
   return text.split(":").reduce((sum, n) => sum * 60 + Number(n), 0) * 1000;
 }
 
+// An episode says how long it is in words, such as "1 hr 2 min" or "59 min".
+function wordsMs(text) {
+  const hr = /(\d+)\s*hr/.exec(text || "");
+  const min = /(\d+)\s*min/.exec(text || "");
+  const sec = /(\d+)\s*sec/.exec(text || "");
+  if (!hr && !min && !sec) return 0;
+  return ((hr ? Number(hr[1]) : 0) * 60 + (min ? Number(min[1]) : 0)) * 60000 + (sec ? Number(sec[1]) : 0) * 1000;
+}
+
 const pageTypeOf = (nav) =>
   nav?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType || "";
 
@@ -252,11 +261,38 @@ function cardOf(r) {
   return collectionOf(nav, name, runs, image);
 }
 
+// A show's card names who publishes it under its name.
+function showOf(id, name, runs, image) {
+  const credits = creditsOf(runs);
+  return { id, name, imageUrl: image, publisher: credits.artists[0]?.name || credits.names[0] || "" };
+}
+
+// An episode of a podcast: a row with a thumbnail, when it came out and how
+// long it is. Its show is named under it, where others' episodes are listed too.
+function episodeOf(r) {
+  const id =
+    r.onTap?.watchEndpoint?.videoId ||
+    findOne(r, "musicPlayButtonRenderer")?.playNavigationEndpoint?.watchEndpoint?.videoId;
+  if (!id) return null;
+  const showRun = (r.secondTitle?.runs || []).find((run) => run.navigationEndpoint?.browseEndpoint);
+  const show = showRun ? { id: showRun.navigationEndpoint.browseEndpoint.browseId, name: showRun.text } : null;
+  const progress = textOf(findOne(r, "musicPlaybackProgressRenderer")?.playbackProgressText);
+  const credits = {
+    artists: show ? [show] : [],
+    album: null,
+    duration: wordsMs(progress) || wordsMs(textOf(r.subtitle)),
+    names: [],
+  };
+  return { kind: "track", value: trackFrom(id, textOf(r.title), credits, imageOf(r.thumbnail)) };
+}
+
 function collectionOf(nav, name, runs, image) {
   const id = nav?.browseEndpoint?.browseId;
   if (!id) return null;
   const credits = creditsOf(runs);
   switch (pageTypeOf(nav)) {
+    case "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
+      return { kind: "show", value: showOf(id, name, runs, image) };
     case "MUSIC_PAGE_TYPE_ARTIST":
     case "MUSIC_PAGE_TYPE_USER_CHANNEL":
       return { kind: "artist", value: { id, name, imageUrl: image } };
@@ -274,7 +310,8 @@ function itemsOf(list) {
   for (const item of list || []) {
     const row = item.musicResponsiveListItemRenderer;
     const card = item.musicTwoRowItemRenderer;
-    const got = row ? rowOf(row) : card ? cardOf(card) : null;
+    const episode = item.musicMultiRowListItemRenderer;
+    const got = row ? rowOf(row) : card ? cardOf(card) : episode ? episodeOf(episode) : null;
     if (got) out.push(got);
   }
   return out;
@@ -318,6 +355,7 @@ async function sectionsOf(answer) {
         albums: ofKind(items, "album"),
         artists: ofKind(items, "artist"),
         playlists: ofKind(items, "playlist"),
+        shows: ofKind(items, "show"),
       });
     }
   }
@@ -421,7 +459,15 @@ export async function home() {
   return { title: t("Home"), sections };
 }
 
+// The chips of Home that filter it to podcasts: the shows the listener keeps,
+// their new episodes, and shows they might like.
+const podcasts = {
+  browseId: "FEmusic_home",
+  params: "ggNCSgQIDBADSgQIBxABSgQIBRABSgQIChABSgQIDRABSgQIDhABSgQICRABSgQICBABSgQIBBABSgQIBhABSgQIAxAB",
+};
+
 export async function browse({ page }) {
+  if (page === "podcasts") return { title: t("Podcasts"), sections: await sectionsOf(await call("browse", podcasts)) };
   const ids = { charts: ["FEmusic_charts", "Charts"], new: ["FEmusic_new_releases", "New Releases"] };
   const known = ids[page];
   if (known) return { title: t(known[1]), sections: await sectionsOf(await browseId(known[0])) };
@@ -579,6 +625,33 @@ export async function like({ id, on }) {
     if (on) likedSet.add(id);
     else likedSet.delete(id);
   }
+}
+
+// A show and a page of its episodes, which come by the shelf's token.
+const showMeta = new Map();
+
+export async function show({ id, offset }) {
+  const token = pageToken(`show:${id}`, offset);
+  const meta = showMeta.get(id);
+  if (offset > 0 && !token) return { show: meta || { id, name: "" }, episodes: [], more: false };
+  const answer = token ? await call("browse", { continuation: token }) : await browseId(id);
+  if (!token) {
+    const header = findOne(answer, "musicResponsiveHeaderRenderer") || findOne(answer, "musicImmersiveHeaderRenderer");
+    showMeta.set(id, {
+      id,
+      name: textOf(header?.title),
+      imageUrl: imageOf(header?.thumbnail),
+      description: textOf(findOne(header, "musicDescriptionShelfRenderer")?.description),
+      publisher: textOf(header?.straplineTextOne),
+      subscribed: Boolean(findOne(header, "toggleButtonRenderer")?.isToggled),
+    });
+  }
+  const { items, token: next } = rowsOf(answer);
+  const episodes = ofKind(items, "track");
+  const known = showMeta.get(id) || { id, name: "" };
+  // A show page's episodes name no show under them: the page's is theirs.
+  for (const e of episodes) if (!e.artists.length && known.name) e.artists = [{ id, name: known.name }];
+  return { show: known, episodes, more: keepToken(`show:${id}`, offset + episodes.length, next) };
 }
 
 export async function recent() {
