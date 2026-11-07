@@ -466,8 +466,29 @@ const podcasts = {
   params: "ggNCSgQIDBADSgQIBxABSgQIBRABSgQIChABSgQIDRABSgQIDhABSgQICRABSgQICBABSgQIBBABSgQIBhABSgQIAxAB",
 };
 
+// What Explore lists of podcasts: what to start with, what's popular, and
+// shows by topic. It's kept a few minutes, as the page asks for it again.
+let exploreCache = null;
+let exploreAt = 0;
+const exploreFor = 5 * 60 * 1000;
+
+async function exploreSections() {
+  if (exploreCache && Date.now() - exploreAt < exploreFor) return exploreCache;
+  exploreCache = await sectionsOf(await browseId("FEmusic_non_music_audio"));
+  exploreAt = Date.now();
+  return exploreCache;
+}
+
 export async function browse({ page }) {
-  if (page === "podcasts") return { title: t("Podcasts"), sections: await sectionsOf(await call("browse", podcasts)) };
+  if (page === "podcasts") {
+    const [answer, explore] = await Promise.all([call("browse", podcasts), exploreSections()]);
+    const sections = await sectionsOf(answer);
+    // Explore follows them with a few shows, and the whole page behind See All.
+    const start = explore[0];
+    if (start?.shows?.length) sections.push({ title: t("Explore"), shows: start.shows, morePage: "podcasts-explore" });
+    return { title: t("Podcasts"), sections };
+  }
+  if (page === "podcasts-explore") return { title: t("Explore"), sections: await exploreSections() };
   const ids = { charts: ["FEmusic_charts", "Charts"], new: ["FEmusic_new_releases", "New Releases"] };
   const known = ids[page];
   if (known) return { title: t(known[1]), sections: await sectionsOf(await browseId(known[0])) };
